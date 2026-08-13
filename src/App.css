@@ -1346,33 +1346,166 @@ button:focus-visible {
 
 .main-pipeline {
   position: absolute;
-
   left: 7%;
   right: 7%;
-
   top: 59%;
-
-  height: 24px;
-
+  height: 26px; /* Slightly taller for better cylinder height */
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-
   z-index: 12;
+  border-radius: 13px; /* Matches half height for round caps */
+  box-sizing: border-box;
 
-  border-radius: 15px;
+  /* Premium Glass cylinder rendering - Normal state (Cyan-Blue core) */
+  background: 
+    /* High gloss reflections */
+    linear-gradient(to bottom, 
+      rgba(255, 255, 255, 0.45) 0%, 
+      rgba(255, 255, 255, 0.15) 18%, 
+      transparent 35%, 
+      rgba(0, 0, 0, 0.3) 82%, 
+      rgba(0, 0, 0, 0.6) 100%
+    ),
+    /* Fluid core */
+    linear-gradient(to bottom, 
+      #134359 0%, 
+      #207fa2 22%, 
+      #31cafd 45%, 
+      #166080 75%, 
+      #082e3f 100%
+    ) !important;
 
-  background:
-    linear-gradient(
-      180deg,
-      #318caf,
-      #12516d
-    );
-
-  border: 2px solid #3b9fc0;
-
+  border: 2px solid rgba(137, 223, 247, 0.65) !important;
   box-shadow:
-    0 0 18px rgba(31, 181, 235, 0.28),
-    inset 0 2px rgba(255, 255, 255, 0.12);
+    0 0 25px rgba(31, 181, 235, 0.35),
+    inset 0 2px 4px rgba(255, 255, 255, 0.3),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.5) !important;
+
+  overflow: hidden;
+  transition: all 0.4s ease !important;
+}
+
+/* Glass Cylinder - Ruptured/Leaking state (Red-Orange warning core) */
+.main-pipeline.pipeline-ruptured {
+  background: 
+    /* High gloss reflections */
+    linear-gradient(to bottom, 
+      rgba(255, 255, 255, 0.5) 0%, 
+      rgba(255, 255, 255, 0.18) 18%, 
+      transparent 35%, 
+      rgba(0, 0, 0, 0.4) 82%, 
+      rgba(0, 0, 0, 0.7) 100%
+    ),
+    /* Red-Orange warning core */
+    linear-gradient(to bottom, 
+      #792618 0%, 
+      #b8432e 22%, 
+      #ff5a3b 45%, 
+      #8c2214 75%, 
+      #440c05 100%
+    ) !important;
+
+  border: 2px solid rgba(255, 140, 120, 0.75) !important;
+  box-shadow:
+    0 0 30px rgba(255, 77, 67, 0.45),
+    inset 0 2px 4px rgba(255, 255, 255, 0.4),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Glass Cylinder - Isolated/Safe state (Amber-Gold core, depressurized) */
+.main-pipeline.pipeline-isolated {
+  background: 
+    /* High gloss reflections */
+    linear-gradient(to bottom, 
+      rgba(255, 255, 255, 0.4) 0%, 
+      rgba(255, 255, 255, 0.15) 18%, 
+      transparent 35%, 
+      rgba(0, 0, 0, 0.3) 82%, 
+      rgba(0, 0, 0, 0.5) 100%
+    ),
+    /* Depressurized Amber core */
+    linear-gradient(to bottom, 
+      #593e13 0%, 
+      #9e752d 22%, 
+      #e0ab4a 45%, 
+      #805e1a 75%, 
+      #3f2d0a 100%
+    ) !important;
+
+  border: 2px solid rgba(255, 203, 115, 0.6) !important;
+  box-shadow:
+    0 0 20px rgba(255, 173, 51, 0.22),
+    inset 0 2px 4px rgba(255, 255, 255, 0.25),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Glass Cylinder - Offline state (Empty glass tube) */
+.main-pipeline.pipeline-offline {
+  background: 
+    /* High gloss reflections */
+    linear-gradient(to bottom, 
+      rgba(255, 255, 255, 0.35) 0%, 
+      rgba(255, 255, 255, 0.1) 18%, 
+      transparent 35%, 
+      rgba(0, 0, 0, 0.4) 82%, 
+      rgba(0, 0, 0, 0.8) 100%
+    ),
+    /* Empty dark capsule */
+    linear-gradient(to bottom, 
+      #09131a 0%, 
+      #13222e 45%, 
+      #060c12 100%
+    ) !important;
+
+  border: 2px solid rgba(137, 223, 247, 0.25) !important;
+  box-shadow:
+    0 0 10px rgba(31, 181, 235, 0.05),
+    inset 0 2px 3px rgba(255, 255, 255, 0.1),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.6) !important;
+}
+
+.main-pipeline::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.35) 0px,
+    rgba(255, 255, 255, 0.35) 8px,
+    transparent 8px,
+    transparent 26px
+  );
+  background-size: 52px 100%;
+  animation: pipeWaterStripes 1s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes pipeWaterStripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 52px 0;
+  }
+}
+
+/* Stateful flow marker stripes behavior */
+.main-pipeline.pipeline-ruptured::before {
+  background-image: repeating-linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.4) 0px,
+    rgba(255, 255, 255, 0.4) 8px,
+    transparent 8px,
+    transparent 26px
+  );
+  animation-duration: 0.5s; /* Speeds up due to rapid leakage flow rate */
+}
+
+.main-pipeline.pipeline-isolated::before,
+.main-pipeline.pipeline-offline::before {
+  opacity: 0; /* Flow completely halted */
+  animation: none;
 }
 
 .underground-segment {
@@ -1439,6 +1572,27 @@ button:focus-visible {
   box-shadow:
     0 0 8px #2dcaff,
     0 0 18px rgba(45, 202, 255, 0.8);
+}
+
+.underground-segment.leaking::after {
+  background: #ff8f7f;
+
+  box-shadow:
+    0 0 8px #ff6b51,
+    0 0 18px rgba(255, 91, 67, 0.8);
+
+  animation: leakingPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes leakingPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .segment-number {
@@ -1702,7 +1856,7 @@ button:focus-visible {
    FLOW INDICATORS
 ============================================================ */
 
-.underground-flow {
+.flow-marker {
   position: absolute;
 
   width: 28px;
@@ -1716,7 +1870,11 @@ button:focus-visible {
 
   z-index: 17;
 
-  animation: waterFlow 3s linear infinite;
+  animation-name: waterFlow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+
+  transition: opacity 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .flow-1 {
@@ -1740,6 +1898,12 @@ button:focus-visible {
   left: 82%;
   top: 60%;
   animation-delay: 2.1s;
+}
+
+.underground-scene.leak-active .flow-marker {
+  background: #ffb199;
+
+  box-shadow: 0 0 10px rgba(255, 107, 97, 0.75);
 }
 
 @keyframes waterFlow {
@@ -2727,5 +2891,420 @@ button:focus-visible {
 
   .underground-scene {
     height: 520px;
+  }
+}
+
+/* ============================================================
+   INTERACTIVE SIMULATION ADDITIONS (VALVES, PUMP & WATER SPRAY)
+============================================================ */
+
+/* Closed & Open Valve states */
+.underground-valve {
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+}
+
+.underground-valve:hover {
+  background: #1d465c !important;
+  border-color: #6da2bf !important;
+  transform: rotate(45deg) scale(1.08) !important;
+}
+
+.underground-valve.closed {
+  background: #471111 !important;
+  border-color: #ff5047 !important;
+  color: #ffb8b3 !important;
+  box-shadow: 
+    0 0 10px rgba(255, 80, 71, 0.4),
+    0 0 20px rgba(255, 80, 71, 0.15) !important;
+}
+
+.underground-valve:not(.closed) {
+  background: #0b3824 !important;
+  border-color: #27ca8a !important;
+  color: #a4ffd3 !important;
+  box-shadow: 
+    0 0 10px rgba(39, 202, 138, 0.25),
+    0 0 18px rgba(39, 202, 138, 0.1) !important;
+}
+
+/* Isolated segment (inactive leak) visual updates */
+.underground-segment.isolated-leak {
+  background: rgba(255, 173, 51, 0.05) !important;
+  box-shadow: inset 0 0 12px rgba(255, 173, 51, 0.08) !important;
+}
+
+.underground-segment.isolated-leak::after {
+  background: #ffc97a !important;
+  box-shadow: 
+    0 0 8px #ffad33,
+    0 0 15px rgba(255, 173, 51, 0.5) !important;
+}
+
+/* Response Action button styles */
+button.response-action {
+  transition: all 0.2s ease !important;
+}
+
+button.response-action:hover {
+  background: rgba(255, 70, 60, 0.1) !important;
+  border-color: rgba(255, 94, 80, 0.4) !important;
+  box-shadow: 0 0 12px rgba(255, 70, 60, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+/* Pump Offline Reservoir styles */
+.underground-reservoir.pump-closed::before {
+  border-color: #8c3833 !important;
+  background: #2b1111 !important;
+  box-shadow: 0 0 20px rgba(140, 56, 51, 0.15) !important;
+}
+
+.underground-reservoir.pump-closed span {
+  color: #ff6258 !important;
+  text-shadow: 0 0 8px rgba(255, 98, 88, 0.3) !important;
+}
+
+/* Flow Marker transition */
+.flow-marker {
+  transition: opacity 0.4s ease, background 0.4s ease, box-shadow 0.4s ease !important;
+}
+
+/* WATER SPRAY ANIMATION - High Visibility */
+.water-spray {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 200px;
+  pointer-events: none;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.spray-stream {
+  position: absolute;
+  background: linear-gradient(to top, rgba(89, 237, 255, 0.95), rgba(44, 202, 255, 0.2) 60%, rgba(44, 202, 255, 0));
+  width: 8px;
+  bottom: 50%;
+  border-radius: 4px;
+  transform-origin: bottom center;
+  filter: drop-shadow(0 0 8px rgba(89, 237, 255, 0.9));
+}
+
+.spray-stream.up-left {
+  height: 120px;
+  transform: rotate(-25deg);
+  animation: gushUp 0.4s infinite ease-out;
+}
+
+.spray-stream.up-right {
+  height: 120px;
+  transform: rotate(25deg);
+  animation: gushUp 0.4s infinite ease-out 0.15s;
+}
+
+.spray-stream.down-left {
+  height: 80px;
+  top: 50%;
+  background: linear-gradient(to bottom, rgba(89, 237, 255, 0.95), rgba(44, 202, 255, 0.2) 60%, rgba(44, 202, 255, 0));
+  transform-origin: top center;
+  transform: rotate(-155deg);
+  animation: gushDown 0.4s infinite ease-out 0.08s;
+}
+
+.spray-stream.down-right {
+  height: 80px;
+  top: 50%;
+  background: linear-gradient(to bottom, rgba(89, 237, 255, 0.95), rgba(44, 202, 255, 0.2) 60%, rgba(44, 202, 255, 0));
+  transform-origin: top center;
+  transform: rotate(155deg);
+  animation: gushDown 0.4s infinite ease-out 0.2s;
+}
+
+/* Pulsing leak geyser source */
+.spray-geyser {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  background: rgba(89, 237, 255, 0.4);
+  border-radius: 50%;
+  filter: blur(4px);
+  animation: geyserPulse 0.3s infinite alternate;
+  z-index: 49;
+}
+
+@keyframes geyserPulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+}
+
+@keyframes gushUp {
+  0% {
+    height: 0px;
+    opacity: 1;
+  }
+  100% {
+    height: 130px;
+    opacity: 0;
+  }
+}
+
+@keyframes gushDown {
+  0% {
+    height: 0px;
+    opacity: 1;
+  }
+  100% {
+    height: 90px;
+    opacity: 0;
+  }
+}
+
+/* Droplets shooting out - Thicker & wider spread */
+.droplet {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #e6faff;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 5px #59edff);
+  animation: shoot 0.6s infinite ease-out;
+}
+
+.droplet:nth-child(6) { animation-delay: 0s; --dx: -45px; --dy: -90px; }
+.droplet:nth-child(7) { animation-delay: 0.1s; --dx: 45px; --dy: -100px; }
+.droplet:nth-child(8) { animation-delay: 0.2s; --dx: -65px; --dy: -70px; }
+.droplet:nth-child(9) { animation-delay: 0.3s; --dx: 65px; --dy: -80px; }
+.droplet:nth-child(10) { animation-delay: 0.4s; --dx: 0px; --dy: -120px; }
+.droplet:nth-child(11) { animation-delay: 0.15s; --dx: -35px; --dy: 70px; }
+.droplet:nth-child(12) { animation-delay: 0.25s; --dx: 35px; --dy: 80px; }
+
+@keyframes shoot {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+   SCADA TERMINAL, SOIL WETNESS & ACTUATOR SPIN ADDITIONS
+============================================================ */
+
+/* Valve Actuator closing transitions */
+@keyframes spinActuator {
+  0% {
+    transform: rotate(45deg);
+    border-color: #ff9e3b;
+    box-shadow: 0 0 10px rgba(255, 158, 59, 0.4);
+  }
+  50% {
+    transform: rotate(225deg);
+    border-color: #ffe675;
+    box-shadow: 0 0 18px rgba(255, 230, 117, 0.8);
+  }
+  100% {
+    transform: rotate(405deg);
+    border-color: #ff9e3b;
+    box-shadow: 0 0 10px rgba(255, 158, 59, 0.4);
+  }
+}
+
+.underground-valve.closing {
+  animation: spinActuator 1.2s infinite linear !important;
+  background: #472b11 !important;
+  color: #ffca8f !important;
+  cursor: wait !important;
+}
+
+/* Wet soil moisture glow animation */
+.wet-soil-glow {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 140px;
+  height: 140px;
+  background: radial-gradient(circle, rgba(89, 237, 255, 0.22) 0%, rgba(44, 202, 255, 0.08) 40%, rgba(44, 202, 255, 0) 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 5;
+  animation: 
+    soilSaturate 4s forwards ease-out,
+    mudPulse 2s infinite alternate ease-in-out;
+}
+
+@keyframes soilSaturate {
+  0% {
+    transform: translate(-50%, -50%) scale(0.2);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes mudPulse {
+  0% {
+    filter: brightness(0.85) contrast(1);
+  }
+  100% {
+    filter: brightness(1.15) contrast(1.1);
+  }
+}
+
+/* SCADA Event Log Console styling */
+.scada-console-card {
+  margin-top: 10px;
+  border-color: rgba(120, 165, 195, 0.18) !important;
+}
+
+.scada-log-terminal {
+  margin: 15px 22px 22px;
+  border-radius: 10px;
+  background: #040d14;
+  border: 1px solid rgba(120, 165, 195, 0.12);
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  font-family: "Courier New", Courier, monospace;
+}
+
+.terminal-header {
+  height: 32px;
+  padding: 0 14px;
+  background: rgba(10, 24, 38, 0.9);
+  border-bottom: 1px solid rgba(120, 165, 195, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.terminal-dot.red { background: #ff5f56; }
+.terminal-dot.yellow { background: #ffbd2e; }
+.terminal-dot.green { background: #27c93f; }
+
+.terminal-title {
+  margin-left: 8px;
+  color: #537590;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.terminal-body {
+  height: 180px;
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column; /* Shows logs in chronological order */
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.4;
+  scroll-behavior: smooth;
+}
+
+.terminal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.terminal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminal-body::-webkit-scrollbar-thumb {
+  background: rgba(120, 165, 195, 0.15);
+  border-radius: 3px;
+}
+
+.terminal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 165, 195, 0.3);
+}
+
+.terminal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.log-time {
+  color: #4b7496;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.log-text {
+  word-break: break-word;
+}
+
+.log-info {
+  color: #72dbff;
+  text-shadow: 0 0 4px rgba(114, 219, 255, 0.25);
+}
+
+.log-warning {
+  color: #ffad5b;
+  text-shadow: 0 0 4px rgba(255, 173, 91, 0.25);
+}
+
+.log-danger {
+  color: #ff786e;
+  font-weight: bold;
+  text-shadow: 0 0 6px rgba(255, 120, 110, 0.35);
+}
+
+.log-success {
+  color: #32dc98;
+  text-shadow: 0 0 4px rgba(50, 220, 152, 0.25);
+}
+
+/* Secondary Bypass Pipeline animations */
+.secondary-pipe.bypass-active {
+  background: linear-gradient(180deg, #1aa3d4, #0b4961) !important;
+  border-color: #5ec7eb !important;
+  box-shadow: 
+    0 0 15px rgba(31, 181, 235, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.2) !important;
+}
+
+.secondary-pipe.bypass-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 15px;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(156, 239, 255, 0.75) 0px,
+    rgba(156, 239, 255, 0.75) 8px,
+    transparent 8px,
+    transparent 24px
+  );
+  background-size: 32px 100%;
+  animation: secondaryFlow 0.8s linear infinite;
+  opacity: 0.95;
+}
+
+@keyframes secondaryFlow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 32px 0; /* Flows left-to-right */
   }
 }

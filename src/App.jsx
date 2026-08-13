@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import "./App.css";
 
 const zones = [
@@ -336,6 +336,104 @@ function App() {
   const [selectedSegmentId, setSelectedSegmentId] = useState("P-27");
   const [leakActive, setLeakActive] = useState(false);
   const [selectedSensor, setSelectedSensor] = useState(null);
+  const [closedValves, setClosedValves] = useState({
+    V1: "open",
+    V2: "open",
+    V3: "open",
+    V4: "open",
+  });
+  const [pumpClosed, setPumpClosed] = useState(false);
+  const [auxiliaryActive, setAuxiliaryActive] = useState(false);
+  const [logs, setLogs] = useState([
+    { id: "init", timestamp: new Date().toLocaleTimeString(), message: "SCADA water intelligence twin initialized. System online.", type: "success" }
+  ]);
+
+  const [sensorHistory, setSensorHistory] = useState(() => {
+    const initialHistory = {};
+    sensors.forEach((s) => {
+      const baseP = parseFloat(s.pressure) || 5.0;
+      const baseF = parseFloat(s.flow) || 20.0;
+      initialHistory[s.id] = Array.from({ length: 15 }, () => ({
+        pressure: baseP,
+        flow: baseF,
+      }));
+    });
+    return initialHistory;
+  });
+
+  const addLog = useCallback((message, type = "info") => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs((prev) => [
+      { id: Math.random().toString(), timestamp, message, type },
+      ...prev.slice(0, 49),
+    ]);
+  }, []);
+
+  const toggleValve = (valveId) => {
+    setClosedValves((prev) => {
+      const currentState = prev[valveId];
+      if (currentState === "closed") {
+        addLog(`Command sent: OPEN ${valveId}. Initiating actuator opening sequence...`, "info");
+        return { ...prev, [valveId]: "open" };
+      } else if (currentState === "open") {
+        addLog(`Command sent: CLOSE ${valveId}. Valve actuator is closing...`, "warning");
+        
+        setTimeout(() => {
+          setClosedValves((latest) => {
+            if (latest[valveId] === "closing") {
+              addLog(`Event: ${valveId} fully CLOSED. Downstream flow isolated.`, "success");
+              return { ...latest, [valveId]: "closed" };
+            }
+            return latest;
+          });
+        }, 1500);
+
+        return { ...prev, [valveId]: "closing" };
+      }
+      return prev;
+    });
+  };
+
+  const getSegmentPressureFactor = (index) => {
+    if (pumpClosed && !auxiliaryActive) return 0;
+    
+    const v1 = closedValves.V1;
+    const v2 = closedValves.V2;
+    const v3 = closedValves.V3;
+    const v4 = closedValves.V4;
+
+    // If pump is offline but auxiliary pump is active:
+    if (pumpClosed && auxiliaryActive) {
+      if (index >= 3 && v1 === "closed") return 0;
+      if (index >= 6 && v2 === "closed") return 0;
+      if (index >= 8 && v3 === "closed") return 0;
+      if (index >= 10 && v4 === "closed") return 0;
+      return 0.35;
+    }
+
+    // Main pump is online
+    if (index >= 3 && index < 6 && v1 === "closed") return 0;
+    if (index >= 6 && index < 8 && v2 === "closed") return 0;
+    if (index >= 8 && index < 10 && v3 === "closed") return 0;
+    if (index >= 10 && index < 12 && v4 === "closed") return 0;
+
+    if (index >= 3 && index < 6 && v1 === "closing") return 0.4;
+    if (index >= 6 && index < 8 && v2 === "closing") return 0.4;
+    if (index >= 8 && index < 10 && v3 === "closing") return 0.4;
+    if (index >= 10 && index < 12 && v4 === "closing") return 0.4;
+
+    // Grid loop bypass calculation
+    let multiplier = 1.0;
+    if (index >= 6 && v1 === "closed") multiplier *= 0.65;
+    if (index >= 8 && (v1 === "closed" || v2 === "closed")) multiplier *= 0.65;
+    if (index >= 10 && (v1 === "closed" || v2 === "closed" || v3 === "closed")) multiplier *= 0.65;
+
+    return multiplier;
+  };
+
+  const isSegmentPressurized = (index) => {
+    return getSegmentPressureFactor(index) > 0.1;
+  };
 
   const selectedZoneData =
     zones.find((zone) => zone.id === selectedZone) || zones[1];
@@ -376,6 +474,143 @@ function App() {
     )
   );
 
+  const metrics = useMemo(() => {
+    const leakIndex = selectedUndergroundIndex;
+    const pressureFactor = getSegmentPressureFactor(leakIndex);
+    const isLeaking = leakActive && pressureFactor > 0.05;
+
+    if (pumpClosed) {
+      if (auxiliaryActive) {
+        if (isLeaking) {
+          const loss = Math.round(38 * 0.35);
+          const pressure = 1.8;
+          const flow = 40;
+          return {
+            pressure,
+            flowRate: flow,
+            waterLoss: loss,
+            status: "AUXILIARY FLOW - LEAK ACTIVE",
+            statusClass: "danger-badge",
+            pressureWidth: `${(pressure / 6) * 100}%`,
+            flowWidth: `${(flow / 120) * 100}%`,
+            lossWidth: `${(loss / 60) * 100}%`,
+          };
+        }
+
+        return {
+          pressure: 1.8,
+          flowRate: 35,
+          waterLoss: 0,
+          status: "AUXILIARY FLOW ACTIVE",
+          statusClass: "network-badge",
+          pressureWidth: "30%",
+          flowWidth: "29%",
+          lossWidth: "0%",
+        };
+      }
+
+      return {
+        pressure: 0.0,
+        flowRate: 0,
+        waterLoss: 0,
+        status: "PUMP OFFLINE",
+        statusClass: "danger-badge",
+        pressureWidth: "0%",
+        flowWidth: "0%",
+        lossWidth: "0%",
+      };
+    }
+
+    if (isLeaking) {
+      const loss = Math.round(38 * pressureFactor);
+      const pressure = parseFloat((2.8 + 2.4 * (1.0 - pressureFactor)).toFixed(1));
+      const flow = Math.round(62 + 38 * (1.0 - pressureFactor));
+      
+      const statusText = pressureFactor < 0.5 ? "LEAK ISOLATING..." : "LEAK DETECTED";
+      const statusClass = pressureFactor < 0.5 ? "network-badge" : "danger-badge";
+
+      return {
+        pressure,
+        flowRate: flow,
+        waterLoss: loss,
+        status: statusText,
+        statusClass,
+        pressureWidth: `${(pressure / 6) * 100}%`,
+        flowWidth: `${(flow / 120) * 100}%`,
+        lossWidth: `${(loss / 60) * 100}%`,
+      };
+    }
+
+    // No active leak or leak is isolated
+    const isLeakIsolated = leakActive && pressureFactor <= 0.05;
+    const anyValveClosedOrClosing = 
+      closedValves.V1 !== "open" || 
+      closedValves.V2 !== "open" || 
+      closedValves.V3 !== "open" || 
+      closedValves.V4 !== "open";
+
+    if (isLeakIsolated) {
+      return {
+        pressure: 5.4,
+        flowRate: 30,
+        waterLoss: 0,
+        status: "LEAK ISOLATED (SAFE)",
+        statusClass: "network-badge",
+        pressureWidth: "85%",
+        flowWidth: "30%",
+        lossWidth: "0%",
+      };
+    }
+
+    if (anyValveClosedOrClosing) {
+      let flow = 100;
+      let statusText = "MAINTENANCE ACTIVE";
+      
+      const isClosing = 
+        closedValves.V1 === "closing" || 
+        closedValves.V2 === "closing" || 
+        closedValves.V3 === "closing" || 
+        closedValves.V4 === "closing";
+      
+      if (isClosing) {
+        statusText = "VALVE ACTUATING...";
+      }
+
+      if (closedValves.V1 === "closed" || closedValves.V1 === "closing") {
+        flow = closedValves.V1 === "closing" ? 70 : 25;
+      } else if (closedValves.V2 === "closed" || closedValves.V2 === "closing") {
+        flow = closedValves.V2 === "closing" ? 80 : 50;
+      } else if (closedValves.V3 === "closed" || closedValves.V3 === "closing") {
+        flow = closedValves.V3 === "closing" ? 90 : 75;
+      } else if (closedValves.V4 === "closed" || closedValves.V4 === "closing") {
+        flow = closedValves.V4 === "closing" ? 95 : 90;
+      }
+
+      return {
+        pressure: 5.5,
+        flowRate: flow,
+        waterLoss: 0,
+        status: statusText,
+        statusClass: "network-badge",
+        pressureWidth: "88%",
+        flowWidth: `${flow}%`,
+        lossWidth: "0%",
+      };
+    }
+
+    // Normal state
+    return {
+      pressure: 5.2,
+      flowRate: 100,
+      waterLoss: 0,
+      status: "ALL NETWORKS NORMAL",
+      statusClass: "network-badge",
+      pressureWidth: "82%",
+      flowWidth: "76%",
+      lossWidth: "0%",
+    };
+  }, [pumpClosed, auxiliaryActive, leakActive, selectedUndergroundIndex, closedValves]);
+
   const selectZone = (zoneId, shouldScroll = true) => {
     const zoneSegments = citySegments.filter(
       (segment) => segment.zone === zoneId
@@ -387,6 +622,8 @@ function App() {
     setSelectedSegmentId(firstSegment.id);
     setLeakActive(false);
     setSelectedSensor(null);
+    setClosedValves({ V1: "open", V2: "open", V3: "open", V4: "open" });
+    setPumpClosed(false);
 
     if (shouldScroll) {
       setTimeout(() => {
@@ -409,6 +646,8 @@ function App() {
     setSelectedZone(segment.zone);
     setLeakActive(false);
     setSelectedSensor(null);
+    setClosedValves({ V1: "open", V2: "open", V3: "open", V4: "open" });
+    setPumpClosed(false);
 
     setTimeout(() => {
       undergroundRef.current?.scrollIntoView({
@@ -428,6 +667,8 @@ function App() {
     setSelectedSegmentId(cityId);
     setSelectedZone(segment.zone);
     setLeakActive(false);
+    setClosedValves({ V1: "open", V2: "open", V3: "open", V4: "open" });
+    setPumpClosed(false);
   };
 
   const toggleSimulation = () => {
@@ -442,6 +683,173 @@ function App() {
     setSelectedSensor(sensor);
   };
 
+  const handleRecommendedAction = () => {
+    if (selectedUndergroundIndex < 3) {
+      setPumpClosed(true);
+    } else {
+      const valve = selectedUndergroundIndex < 6 ? "V1" : selectedUndergroundIndex < 8 ? "V2" : selectedUndergroundIndex < 10 ? "V3" : "V4";
+      toggleValve(valve);
+    }
+  };
+
+  const isFlow1Active = !pumpClosed && (!leakActive || selectedUndergroundIndex >= 3 || !isSegmentPressurized(selectedUndergroundIndex));
+  const isFlow2Active = !pumpClosed && closedValves.V1 !== "closed" && (!leakActive || selectedUndergroundIndex >= 6 || !isSegmentPressurized(selectedUndergroundIndex));
+  const isFlow3Active = !pumpClosed && closedValves.V1 !== "closed" && closedValves.V2 !== "closed" && (!leakActive || selectedUndergroundIndex >= 8 || !isSegmentPressurized(selectedUndergroundIndex));
+  const isFlow4Active = !pumpClosed && closedValves.V1 !== "closed" && closedValves.V2 !== "closed" && closedValves.V3 !== "closed" && (!leakActive || selectedUndergroundIndex >= 10 || !isSegmentPressurized(selectedUndergroundIndex));
+
+  const getFlowStyle = (markerId) => {
+    let active = true;
+    let closing = false;
+    
+    if (markerId === 1) {
+      active = isFlow1Active;
+    } else if (markerId === 2) {
+      active = isFlow2Active;
+      closing = closedValves.V1 === "closing";
+    } else if (markerId === 3) {
+      active = isFlow3Active;
+      closing = closedValves.V1 === "closing" || closedValves.V2 === "closing";
+    } else if (markerId === 4) {
+      active = isFlow4Active;
+      closing = closedValves.V1 === "closing" || closedValves.V2 === "closing" || closedValves.V3 === "closing";
+    }
+
+    if (!active) return { opacity: 0, transition: "opacity 0.4s ease" };
+    
+    const baseDuration = leakActive ? 4.8 : 3.0;
+    const duration = closing ? baseDuration * 2.0 : baseDuration;
+    const opacity = closing ? 0.25 : (leakActive ? 0.62 : 1.0);
+
+    return {
+      animationDuration: `${duration}s`,
+      opacity,
+      transition: "opacity 0.4s ease, background 0.4s ease"
+    };
+  };
+
+  const isFirstPumpLog = useRef(true);
+  useEffect(() => {
+    if (isFirstPumpLog.current) {
+      isFirstPumpLog.current = false;
+      return;
+    }
+    if (pumpClosed) {
+      addLog(`ALERT: Reservoir Main Pump shut down. System pressure dropping.`, "danger");
+      addLog(`System: Attempting emergency reroute to Auxiliary Supply...`, "warning");
+      const timer = setTimeout(() => {
+        setAuxiliaryActive(true);
+        addLog(`Event: Auxiliary Gravity Bypass online. Flow secured for critical zones.`, "success");
+      }, 1500);
+      return () => clearTimeout(timer);
+    } else {
+      addLog(`Event: Reservoir Main Pump online. System pressure building up.`, "success");
+      setAuxiliaryActive(false);
+    }
+  }, [pumpClosed, addLog]);
+
+  const isFirstLeakLog = useRef(true);
+  useEffect(() => {
+    if (isFirstLeakLog.current) {
+      isFirstLeakLog.current = false;
+      return;
+    }
+    if (leakActive) {
+      addLog(`ALERT: Water pipe rupture detected at ${selectedZoneData.name} • Section ${selectedSegment.id}!`, "danger");
+      addLog(`System: Automated leak-isolation sequence initiated.`, "warning");
+      
+      const timer = setTimeout(() => {
+        if (selectedUndergroundIndex < 3) {
+          setPumpClosed(true);
+          addLog(`Auto-Response: Isolating rupture. Command sent: Shutdown Main Pump.`, "warning");
+        } else {
+          const valve = selectedUndergroundIndex < 6 ? "V1" : selectedUndergroundIndex < 8 ? "V2" : selectedUndergroundIndex < 10 ? "V3" : "V4";
+          addLog(`Auto-Response: Isolating rupture. Command sent: Close ${valve}.`, "warning");
+          toggleValve(valve);
+        }
+      }, 1200);
+      return () => clearTimeout(timer);
+    } else {
+      addLog(`Event: Rupture simulation reset. Restoring water distribution network.`, "info");
+      setClosedValves({ V1: "open", V2: "open", V3: "open", V4: "open" });
+      setPumpClosed(false);
+    }
+  }, [leakActive, selectedSegmentId, selectedUndergroundIndex, selectedZoneData.name, selectedSegment.id, addLog]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSensorHistory((prev) => {
+        const next = { ...prev };
+        sensors.forEach((s) => {
+          const history = prev[s.id] || [];
+          let pressure = parseFloat(s.pressure);
+          let flow = parseFloat(s.flow);
+
+          const sensorZone = s.id === "S-01" || s.id === "S-05" ? "A" :
+                             s.id === "S-02" || s.id === "S-06" ? "B" :
+                             s.id === "S-03" || s.id === "S-07" ? "C" : "D";
+
+          const leakIndex = selectedUndergroundIndex;
+          const isZoneLeaking = leakActive && selectedZone === sensorZone && getSegmentPressureFactor(leakIndex) > 0.05;
+
+          if (pumpClosed) {
+            pressure = 0;
+            flow = 0;
+          } else {
+            const noiseP = (Math.random() - 0.5) * 0.12;
+            const noiseF = (Math.random() - 0.5) * 0.8;
+            
+            if (isZoneLeaking) {
+              const pressureFactor = getSegmentPressureFactor(leakIndex);
+              pressure = Math.max(0.2, (pressure * 0.45) * pressureFactor + noiseP);
+              flow = Math.max(0.0, (flow * 1.5) * pressureFactor + noiseF);
+            } else {
+              let pressurized = true;
+              if (sensorZone === "B" && closedValves.V1 === "closed") pressurized = false;
+              if (sensorZone === "C" && (closedValves.V1 === "closed" || closedValves.V2 === "closed")) pressurized = false;
+              if (sensorZone === "D" && (closedValves.V1 === "closed" || closedValves.V2 === "closed" || closedValves.V3 === "closed")) pressurized = false;
+              
+              if (!pressurized) {
+                pressure = 0;
+                flow = 0;
+              } else {
+                pressure = pressure + noiseP;
+                flow = flow + noiseF;
+              }
+            }
+          }
+
+          const newPoint = {
+            pressure: parseFloat(pressure.toFixed(2)),
+            flow: parseFloat(flow.toFixed(1)),
+          };
+
+          next[s.id] = [...history.slice(1), newPoint];
+        });
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [pumpClosed, leakActive, selectedUndergroundIndex, selectedZone, closedValves]);
+
+  const getSparklinePath = (points, type) => {
+    if (!points || points.length === 0) return "";
+    const maxVal = type === "pressure" ? 6 : 45;
+    const coords = points.map((p, i) => {
+      const val = type === "pressure" ? p.pressure : p.flow;
+      const x = (i / 14) * 240;
+      const y = 50 - Math.min(1.0, Math.max(0.0, val / maxVal)) * 42 - 4;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return `M ${coords.join(" L ")}`;
+  };
+  
+  const getSparklineAreaPath = (points, type) => {
+    const linePath = getSparklinePath(points, type);
+    if (!linePath) return "";
+    return `${linePath} L 240,50 L 0,50 Z`;
+  };
+
   return (
     <div className="app">
       <header className="topbar">
@@ -454,9 +862,9 @@ function App() {
           </div>
         </div>
 
-        <div className={`top-status ${leakActive ? "danger-status" : ""}`}>
+        <div className={`top-status ${metrics.statusClass === "danger-badge" ? "danger-status" : ""}`}>
           <span className="status-dot"></span>
-          {leakActive ? "LEAK EVENT ACTIVE" : "SYSTEM ONLINE"}
+          {metrics.status}
         </div>
       </header>
 
@@ -475,13 +883,9 @@ function App() {
             </p>
           </div>
 
-          <div
-            className={`network-badge ${
-              leakActive ? "danger-badge" : ""
-            }`}
-          >
+          <div className={`network-badge ${metrics.statusClass}`}>
             <span></span>
-            {leakActive ? "LEAK DETECTED" : "ALL NETWORKS NORMAL"}
+            {metrics.status}
           </div>
         </div>
 
@@ -815,20 +1219,37 @@ function App() {
                 <div className="surface-connection connection-5"></div>
 
                 {/* RESERVOIR */}
-                <div className="underground-reservoir">
-                  <div className="tank-water"></div>
-                  <span>RESERVOIR</span>
-                </div>
+                <button
+                  className={`underground-reservoir ${pumpClosed ? "pump-closed" : ""}`}
+                  onClick={() => setPumpClosed(!pumpClosed)}
+                  title={`Click to ${pumpClosed ? "Start" : "Stop"} Reservoir Pump`}
+                  style={{ background: "transparent", border: 0, cursor: "pointer", padding: 0 }}
+                >
+                  <div className="tank-water" style={{ height: pumpClosed ? "0px" : "32px", transition: "height 0.5s ease" }}></div>
+                  <span style={{ color: pumpClosed ? "#ff6258" : "#71899a", transition: "color 0.3s ease" }}>
+                    {pumpClosed ? "PUMP OFFLINE" : "RESERVOIR"}
+                  </span>
+                </button>
 
                 {/* SECONDARY PIPELINES */}
-                <div className="secondary-pipe secondary-top"></div>
-                <div className="secondary-pipe secondary-bottom"></div>
+                <div className={`secondary-pipe secondary-top ${(closedValves.V1 !== "open" || closedValves.V2 !== "open" || closedValves.V3 !== "open" || auxiliaryActive) ? "bypass-active" : ""}`}></div>
+                <div className={`secondary-pipe secondary-bottom ${(closedValves.V1 !== "open" || closedValves.V2 !== "open" || closedValves.V3 !== "open" || auxiliaryActive) ? "bypass-active" : ""}`}></div>
 
                 {/* MAIN PIPELINE */}
-                <div className="main-pipeline">
+                <div className={`main-pipeline ${
+                  pumpClosed && !auxiliaryActive
+                    ? "pipeline-offline" 
+                    : leakActive 
+                      ? isSegmentPressurized(selectedUndergroundIndex) 
+                        ? "pipeline-ruptured" 
+                        : "pipeline-isolated" 
+                      : ""
+                }`}>
                   {undergroundSegments.map((segment, index) => {
                     const isSelected =
                       segment.cityId === selectedSegmentId;
+                    const isLeaking = leakActive && isSelected;
+                    const isPressurized = isSegmentPressurized(index);
 
                     return (
                       <button
@@ -836,7 +1257,9 @@ function App() {
                         className={`underground-segment ${
                           isSelected ? "selected" : ""
                         } ${
-                          leakActive && isSelected ? "leaking" : ""
+                          isLeaking && isPressurized ? "leaking" : ""
+                        } ${
+                          isLeaking && !isPressurized ? "isolated-leak" : ""
                         }`}
                         onClick={() =>
                           segment.cityId &&
@@ -853,10 +1276,15 @@ function App() {
                           </span>
                         )}
 
-                        {leakActive && isSelected && (
+                        {isLeaking && (
                           <span className="break-marker">
-                            <span className="break-ring"></span>
-                            BREAK
+                            <span className="break-ring" style={{
+                              borderColor: isPressurized ? "#ff6258" : "#ffad33",
+                              boxShadow: isPressurized 
+                                ? "0 0 10px rgba(255, 77, 67, 0.8), 0 0 24px rgba(255, 77, 67, 0.35)"
+                                : "0 0 10px rgba(255, 173, 51, 0.8), 0 0 24px rgba(255, 173, 51, 0.35)"
+                            }}></span>
+                            {isPressurized ? "BREAK" : "ISOLATED"}
                           </span>
                         )}
                       </button>
@@ -864,21 +1292,58 @@ function App() {
                   })}
                 </div>
 
+                {/* DYNAMIC LEAK SPRAY & SOIL SATURATION */}
+                {leakActive && isSegmentPressurized(selectedUndergroundIndex) && (
+                  <>
+                    <div className="wet-soil-glow" style={{ left: `${7 + (selectedUndergroundIndex + 0.5) * (86 / 12)}%`, top: "59%" }}></div>
+                    <div className="water-spray" style={{ left: `${7 + (selectedUndergroundIndex + 0.5) * (86 / 12)}%`, top: "59%" }}>
+                      <div className="spray-geyser"></div>
+                      <div className="spray-stream up-left"></div>
+                      <div className="spray-stream up-right"></div>
+                      <div className="spray-stream down-left"></div>
+                      <div className="spray-stream down-right"></div>
+                      <div className="droplet"></div>
+                      <div className="droplet"></div>
+                      <div className="droplet"></div>
+                      <div className="droplet"></div>
+                      <div className="droplet"></div>
+                      <div className="droplet"></div>
+                      <div className="droplet"></div>
+                    </div>
+                  </>
+                )}
+
                 {/* VALVES */}
-                <button className="underground-valve valve-1">
-                  V1
+                <button
+                  className={`underground-valve valve-1 ${closedValves.V1 ? "closed" : ""}`}
+                  onClick={() => toggleValve("V1")}
+                  title={`Click to ${closedValves.V1 ? "Open" : "Close"} Valve 1`}
+                >
+                  <span style={{ transform: "rotate(-45deg)", display: "block" }}>V1</span>
                 </button>
 
-                <button className="underground-valve valve-2">
-                  V2
+                <button
+                  className={`underground-valve valve-2 ${closedValves.V2 ? "closed" : ""}`}
+                  onClick={() => toggleValve("V2")}
+                  title={`Click to ${closedValves.V2 ? "Open" : "Close"} Valve 2`}
+                >
+                  <span style={{ transform: "rotate(-45deg)", display: "block" }}>V2</span>
                 </button>
 
-                <button className="underground-valve valve-3">
-                  V3
+                <button
+                  className={`underground-valve valve-3 ${closedValves.V3 ? "closed" : ""}`}
+                  onClick={() => toggleValve("V3")}
+                  title={`Click to ${closedValves.V3 ? "Open" : "Close"} Valve 3`}
+                >
+                  <span style={{ transform: "rotate(-45deg)", display: "block" }}>V3</span>
                 </button>
 
-                <button className="underground-valve valve-4">
-                  V4
+                <button
+                  className={`underground-valve valve-4 ${closedValves.V4 ? "closed" : ""}`}
+                  onClick={() => toggleValve("V4")}
+                  title={`Click to ${closedValves.V4 ? "Open" : "Close"} Valve 4`}
+                >
+                  <span style={{ transform: "rotate(-45deg)", display: "block" }}>V4</span>
                 </button>
 
                 {/* SENSORS */}
@@ -940,31 +1405,19 @@ function App() {
 
                 <div
                   className="flow-marker flow-1"
-                  style={{
-                    animationDuration: leakActive ? "4.8s" : "3s",
-                    opacity: leakActive ? 0.62 : 1,
-                  }}
+                  style={getFlowStyle(1)}
                 ></div>
                 <div
                   className="flow-marker flow-2"
-                  style={{
-                    animationDuration: leakActive ? "4.8s" : "3s",
-                    opacity: leakActive ? 0.62 : 1,
-                  }}
+                  style={getFlowStyle(2)}
                 ></div>
                 <div
                   className="flow-marker flow-3"
-                  style={{
-                    animationDuration: leakActive ? "4.8s" : "3s",
-                    opacity: leakActive ? 0.62 : 1,
-                  }}
+                  style={getFlowStyle(3)}
                 ></div>
                 <div
                   className="flow-marker flow-4"
-                  style={{
-                    animationDuration: leakActive ? "4.8s" : "3s",
-                    opacity: leakActive ? 0.62 : 1,
-                  }}
+                  style={getFlowStyle(4)}
                 ></div>
               </div>
 
@@ -1005,6 +1458,45 @@ function App() {
                   Click any underground segment to change the monitored
                   pipeline.
                 </span>
+              </div>
+            </section>
+
+            {/* ============================================================
+                SECTION 3 — SCADA EVENT LOG CONSOLE
+            ============================================================ */}
+            <section className="visual-card scada-console-card">
+              <div className="visual-header">
+                <div>
+                  <span className="section-label">
+                    3 • SCADA NETWORK SYSTEM LOGS
+                  </span>
+                  <h3>Event Audit Trail</h3>
+                </div>
+                <button
+                  className="close-sensor"
+                  onClick={() => setLogs([{ id: "clear", timestamp: new Date().toLocaleTimeString(), message: "SCADA Event Log cleared by Operator.", type: "info" }])}
+                  title="Clear Logs"
+                  style={{ fontSize: "10px", padding: "0 10px", width: "auto", height: "24px" }}
+                >
+                  CLEAR
+                </button>
+              </div>
+
+              <div className="scada-log-terminal">
+                <div className="terminal-header">
+                  <span className="terminal-dot red"></span>
+                  <span className="terminal-dot yellow"></span>
+                  <span className="terminal-dot green"></span>
+                  <span className="terminal-title">operator@scada-server:~</span>
+                </div>
+                <div className="terminal-body">
+                  {logs.map((log) => (
+                    <div key={log.id} className={`terminal-row log-${log.type}`}>
+                      <span className="log-time">[{log.timestamp}]</span>
+                      <span className="log-text">{log.message}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           </div>
@@ -1091,31 +1583,31 @@ function App() {
 
               <Metric
                 label="NETWORK PRESSURE"
-                value={leakActive ? "2.8" : "5.2"}
+                value={metrics.pressure.toFixed(1)}
                 unit="bar"
-                width={leakActive ? "45%" : "82%"}
-                danger={leakActive}
+                width={metrics.pressureWidth}
+                danger={metrics.pressure < 4.0 && !pumpClosed}
               />
 
               <Metric
                 label="FLOW RATE"
-                value={leakActive ? "62" : "100"}
+                value={metrics.flowRate}
                 unit="L/min"
-                width={leakActive ? "48%" : "76%"}
-                danger={leakActive}
+                width={metrics.flowWidth}
+                danger={metrics.flowRate < 70 && !pumpClosed}
               />
 
               <Metric
                 label="WATER LOSS"
-                value={leakActive ? "38" : "0"}
+                value={metrics.waterLoss}
                 unit="L/min"
-                width={leakActive ? "64%" : "0%"}
-                danger={leakActive}
+                width={metrics.lossWidth}
+                danger={metrics.waterLoss > 0}
               />
 
               <div
                 className={`normal-box ${
-                  leakActive ? "alert-box" : ""
+                  metrics.statusClass === "danger-badge" ? "alert-box" : ""
                 }`}
               >
                 <span></span>
@@ -1124,7 +1616,7 @@ function App() {
                   <small>NETWORK STATUS</small>
 
                   <strong>
-                    {leakActive ? "LEAK DETECTED" : "NORMAL"}
+                    {metrics.status}
                   </strong>
                 </div>
               </div>
@@ -1140,7 +1632,9 @@ function App() {
 
               <p className="simulation-text">
                 {leakActive
-                  ? `Leak detected at selected section ${selectedSegment.id}.`
+                  ? isSegmentPressurized(selectedUndergroundIndex)
+                    ? `Leak detected at selected section ${selectedSegment.id}.`
+                    : `Leak at section ${selectedSegment.id} has been isolated by shutting off the upstream valve.`
                   : `Break the selected section ${selectedSegment.id} to simulate leakage.`}
               </p>
             </section>
@@ -1182,19 +1676,73 @@ function App() {
                 <div className="sensor-detail-grid">
                   <div>
                     <small>PRESSURE</small>
-                    <strong>{selectedSensor.pressure}</strong>
+                    <strong style={{ fontSize: "16px" }}>
+                      {sensorHistory[selectedSensor.id] 
+                        ? `${sensorHistory[selectedSensor.id][14].pressure.toFixed(2)} bar`
+                        : selectedSensor.pressure}
+                    </strong>
+                    
+                    {/* SVG Sparkline for Pressure */}
+                    <div className="sensor-sparkline" style={{ marginTop: "10px", height: "45px" }}>
+                      <svg viewBox="0 0 240 50" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
+                        <defs>
+                          <linearGradient id="pressure-grad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#2ccaff" stopOpacity="0.2"/>
+                            <stop offset="100%" stopColor="#2ccaff" stopOpacity="0"/>
+                          </linearGradient>
+                        </defs>
+                        <path 
+                          d={getSparklineAreaPath(sensorHistory[selectedSensor.id], "pressure")} 
+                          fill="url(#pressure-grad)" 
+                        />
+                        <path 
+                          d={getSparklinePath(sensorHistory[selectedSensor.id], "pressure")} 
+                          fill="none" 
+                          stroke="#2ccaff" 
+                          strokeWidth="2" 
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </div>
                   </div>
 
                   <div>
                     <small>FLOW</small>
-                    <strong>{selectedSensor.flow}</strong>
+                    <strong style={{ fontSize: "16px" }}>
+                      {sensorHistory[selectedSensor.id]
+                        ? `${sensorHistory[selectedSensor.id][14].flow.toFixed(1)} L/min`
+                        : selectedSensor.flow}
+                    </strong>
+
+                    {/* SVG Sparkline for Flow */}
+                    <div className="sensor-sparkline" style={{ marginTop: "10px", height: "45px" }}>
+                      <svg viewBox="0 0 240 50" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
+                        <defs>
+                          <linearGradient id="flow-grad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#35df99" stopOpacity="0.2"/>
+                            <stop offset="100%" stopColor="#35df99" stopOpacity="0"/>
+                          </linearGradient>
+                        </defs>
+                        <path 
+                          d={getSparklineAreaPath(sensorHistory[selectedSensor.id], "flow")} 
+                          fill="url(#flow-grad)" 
+                        />
+                        <path 
+                          d={getSparklinePath(sensorHistory[selectedSensor.id], "flow")} 
+                          fill="none" 
+                          stroke="#35df99" 
+                          strokeWidth="2" 
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </div>
                   </div>
                 </div>
               </section>
             )}
 
             {/* AUTOMATED RESPONSE */}
-            {leakActive && (
+            {leakActive && isSegmentPressurized(selectedUndergroundIndex) && (
               <section className="panel-card detection-card">
                 <span className="section-label">
                   AUTOMATED RESPONSE
@@ -1235,18 +1783,81 @@ function App() {
                   </div>
                 </div>
 
-                <div className="response-action">
-                  <small>RECOMMENDED ACTION</small>
+                <button
+                  className="response-action"
+                  onClick={handleRecommendedAction}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    border: "1px solid rgba(255, 94, 80, 0.16)",
+                    background: "rgba(255, 70, 60, 0.04)",
+                    borderRadius: "10px",
+                    padding: "12px",
+                    marginTop: "18px",
+                    display: "block"
+                  }}
+                >
+                  <small style={{ display: "block", color: "#866361", fontSize: "6px", fontWeight: "800", letterSpacing: "0.1em" }}>
+                    EXECUTE RECOMMENDED ACTION
+                  </small>
 
-                  <strong>
-                    Close{" "}
-                    {selectedZone === "A"
-                      ? "V1"
-                      : selectedZone === "B"
-                      ? "V2"
-                      : selectedZone === "C"
-                      ? "V3"
-                      : "V4"}
+                  <strong style={{ display: "block", marginTop: "5px", color: "#ff796e", fontSize: "12px" }}>
+                    {selectedUndergroundIndex < 3 ? "Shutdown Pump" : `Close ${selectedUndergroundIndex < 6 ? "V1" : selectedUndergroundIndex < 8 ? "V2" : selectedUndergroundIndex < 10 ? "V3" : "V4"}`}
+                  </strong>
+                </button>
+              </section>
+            )}
+
+            {/* AUTOMATED RESPONSE SUCCESS */}
+            {leakActive && !isSegmentPressurized(selectedUndergroundIndex) && (
+              <section
+                className="panel-card detection-card"
+                style={{
+                  borderColor: "rgba(48, 220, 148, 0.35)",
+                  background: "linear-gradient(180deg, rgba(14, 42, 28, 0.95), rgba(10, 19, 29, 0.95))"
+                }}
+              >
+                <span className="section-label" style={{ color: "#5ee0aa" }}>
+                  AUTOMATED RESPONSE COMPLETE
+                </span>
+
+                <div className="detection-header">
+                  <div
+                    className="warning-symbol"
+                    style={{
+                      color: "#32db98",
+                      borderColor: "rgba(48, 220, 148, 0.35)",
+                      background: "rgba(48, 220, 148, 0.08)"
+                    }}
+                  >
+                    ✓
+                  </div>
+
+                  <div>
+                    <h3 style={{ color: "#dff0d4" }}>Leak Isolated</h3>
+
+                    <p style={{ color: "#658c70" }}>
+                      {selectedZoneData.name} •{" "}
+                      {selectedSegment.id}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className="response-action"
+                  style={{
+                    borderColor: "rgba(48, 220, 148, 0.2)",
+                    background: "rgba(48, 220, 148, 0.04)"
+                  }}
+                >
+                  <small style={{ color: "#61866b", display: "block", fontSize: "6px", fontWeight: "800", letterSpacing: "0.1em" }}>
+                    STATUS
+                  </small>
+
+                  <strong style={{ color: "#32db98", display: "block", marginTop: "5px", fontSize: "12px" }}>
+                    Section Isolated Successfully
                   </strong>
                 </div>
               </section>
